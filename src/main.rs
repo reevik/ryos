@@ -1,6 +1,6 @@
 /// Node operation.
 type OP<'a> = fn(&KeyData, &DataNode) -> &'a KeyData<'a>;
-type KeyData<'a> = (&'a String, &'a DataRecord);
+type KeyData<'a> = (&'a String, DataRecord<'a>);
 type KeyNode<'a> = (&'a String, &'a dyn BaseNode<'a>);
 
 enum NodeType {
@@ -8,8 +8,8 @@ enum NodeType {
     DATA
 }
 
-struct DataRecord {
-    data: String,
+struct DataRecord<'a> {
+    data: &'a String,
 }
 
 struct Node<'a> {
@@ -32,6 +32,10 @@ impl<'a> Query<'a> {
     fn is_in_range_of(&self, index_key: &String) -> bool {
         self.query_str < index_key
     }
+
+    fn is_matched(&self, index_key: &String) -> bool {
+        self.query_str == index_key
+    }
 }
 
 struct InnenNode<'a> {
@@ -41,7 +45,6 @@ struct InnenNode<'a> {
 
 trait BaseNode<'a> {
     fn query_and_execute(&self, query_index_key: &Query, op: OP<'a>) -> Vec<&KeyData>;
-
 }
 
 impl<'a> BaseNode<'a> for InnenNode<'a> {
@@ -63,16 +66,26 @@ impl<'a> BaseNode<'a> for DataNode<'a> {
     
     fn query_and_execute(&self, query_index_key: &Query, op: OP<'a>) -> Vec<&KeyData> {
         self.children.iter()
-            .filter(|&&data_key| data_key.0 == query_index_key)
-            .map( |&data_key| { op(data_key, self)} )
+            .filter(|&data_key| query_index_key.is_matched(data_key.0))
+            .map( |data_key| { op(data_key, self)} )
             .collect()
     }
 }
 
+
 struct DataNode<'a> {
     node: Node<'a>, 
-    children: &'a Vec<&'a KeyData<'a>>,
+    children: &'a mut Vec<KeyData<'a>>,
 }
+
+impl<'a> DataNode<'a> {
+
+    fn add(& mut self, query: Query<'a>) {
+        let new_record: DataRecord = DataRecord{ data: query.payload };
+        self.children.push((query.query_str, new_record));
+    }
+}
+
 
 fn main() {
     print!("Hello World!");
