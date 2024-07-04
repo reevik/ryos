@@ -1,10 +1,41 @@
+struct BLinkTree<'a> {
+    root: Option<&'a dyn BaseNode<'a>>,
+}
+
+impl<'a> BLinkTree<'a> {
+
+    fn upsert(&self, query: Query) -> Vec<&KeyData> {
+        match self.root {
+            Some(root) => root.query_and_execute(query, |kd, _dn| { 
+
+                return kd; 
+            }),
+            None => vec![]
+        }
+    }
+
+    fn query(&self, query: Query) -> Vec<&KeyData> {
+        match self.root {
+            Some(root) => root.query_and_execute(query, |kd, _dn| { return kd; }),
+            None => vec![]
+        }
+    }
+
+    fn new() -> BLinkTree<'a> {
+        BLinkTree{root: None}
+    }
+}
+
 /// Node operation.
-type OP<'a> = fn(&KeyData, &DataNode) -> &'a KeyData<'a>;
+type OP<'a> = fn(&'a KeyData, &DataNode) -> &'a KeyData<'a>;
 type KeyData<'a> = (&'a String, DataRecord<'a>);
 type KeyNode<'a> = (&'a String, &'a dyn BaseNode<'a>);
 
 enum NodeType {
+    /// Represents the inner node of the index tree.
     INNER, 
+
+    /// Data node which maintains a set of index key to data record mappings.
     DATA
 }
 
@@ -44,12 +75,19 @@ struct InnenNode<'a> {
 }
 
 trait BaseNode<'a> {
-    fn query_and_execute(&self, query_index_key: &Query, op: OP<'a>) -> Vec<&KeyData>;
+
+    /// query and executes the operation provided on the current node.
+    fn query_and_execute(&'a self, query_index_key: Query, op: OP<'a>) -> Vec<&KeyData>;
+
+    /// Splits the current node into two nodes while registering the new node in the parent.
+    /// The split operation is recursive. If the parent also reaches its maximum capacity, 
+    /// it will continue to split including the root node.
+    fn split(&'a self);
 }
 
 impl<'a> BaseNode<'a> for InnenNode<'a> {
     
-    fn query_and_execute(&self, query_index_key: &Query, op: OP<'a>) -> Vec<&KeyData> {
+    fn query_and_execute(&self, query_index_key: Query, op: OP<'a>) -> Vec<&KeyData> {
         for &key_node in self.children {
             if query_index_key.is_in_range_of(key_node.0) {
                 return key_node.1.query_and_execute(query_index_key, op);
@@ -60,15 +98,23 @@ impl<'a> BaseNode<'a> for InnenNode<'a> {
             _ => panic!("Don't expected to be there.!") 
         }
     }
+    
+    fn split(&self) {
+        todo!()
+    }
 }
 
 impl<'a> BaseNode<'a> for DataNode<'a> {
     
-    fn query_and_execute(&self, query_index_key: &Query, op: OP<'a>) -> Vec<&KeyData> {
+    fn query_and_execute(&'a self, query_index_key: Query, op: OP<'a>) -> Vec<&KeyData> {
         self.children.iter()
             .filter(|&data_key| query_index_key.is_matched(data_key.0))
             .map( |data_key| { op(data_key, self)} )
             .collect()
+    }
+    
+    fn split(&self) {
+        todo!()
     }
 }
 
@@ -88,5 +134,8 @@ impl<'a> DataNode<'a> {
 
 
 fn main() {
-    print!("Hello World!");
+    let blinktree = BLinkTree::new();
+    let query = Query{query_str: & "nope".to_string(), payload: &"".to_string() };
+    let results = blinktree.query(query);
+    println!("Size of the result set={}", results.len())
 }
