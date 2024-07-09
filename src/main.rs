@@ -122,26 +122,29 @@ trait BaseNode<'a> {
 impl<'a> BaseNode<'a> for InnerNode {
     
     fn query_and_execute(&'a self, query_index_key: Query, op: impl FnMut(&'a KeyData, &'a DataNode) -> &'a KeyData) -> Vec<&'a KeyData> {
-        for key_node in self.children {
+        for key_node in &self.children {
             if query_index_key.is_in_range_of(&key_node.0) {
-                match key_node.1 {
+                match &key_node.1 {
                     TreeNode::INNER(n)=> {
-
-                        })
+                        return n.query_and_execute(query_index_key, op);
                     },
                     TreeNode::DATA(n) => { 
-                        n.query_and_execute(query, |kd: &KeyData, _dn: &DataNode| { 
-                            let abc = _dn.get();
-                            return kd; 
-                        })
+                        return  n.query_and_execute(query_index_key, op);
                     }
                 }
-
-                return key_node.1.query_and_execute(query_index_key, op);
             }
         }
-        match self.node.sibling {
-            Some(n) => n.query_and_execute(query_index_key, op),
+        match &self.node.sibling {
+            Some(n) => {
+                match n {
+                    TreeNode::INNER(n)=> {
+                        return n.query_and_execute(query_index_key, op);
+                    },
+                    TreeNode::DATA(n) => { 
+                        return  n.query_and_execute(query_index_key, op);
+                    }                
+                }
+            },
             _ => panic!("Don't expected to be there.!") 
         }
     }
@@ -153,7 +156,7 @@ impl<'a> BaseNode<'a> for InnerNode {
 
 impl<'a> BaseNode<'a> for DataNode {
     
-    fn query_and_execute(&'a self, query_index_key: Query, op: impl FnMut(&'a KeyData, &'a DataNode) -> &'a KeyData) -> Vec<&'a KeyData> {
+    fn query_and_execute(&'a self, query_index_key: Query, mut op: impl FnMut(&'a KeyData, &'a DataNode) -> &'a KeyData) -> Vec<&'a KeyData> {
         let results = self.children.iter()
             .filter(|&data_key| query_index_key.is_matched(&data_key.0))
             .map( |data_key| { op(data_key, self)})
