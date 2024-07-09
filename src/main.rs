@@ -1,38 +1,63 @@
-/// Node operation.
-type OP<'a> = dyn Fn(&'a KeyData, &'a DataNode) -> &'a KeyData<'a>;
-type KeyData<'a> = (&'a String, DataRecord<'a>);
-type KeyNode<'a> = (&'a String, &'a dyn BaseNode<'a>);
+use std::{cell::RefCell, rc::Rc};
 
-struct BLinkTree<'a> {
-    root: Option<&'a dyn BaseNode<'a>>,
+/// Node operation.
+type KeyData = (String, DataRecord);
+type KeyNode = (String, TreeNode);
+
+struct BLinkTree {
+    root: Option<TreeNode>,
 }
 
-impl<'a> BLinkTree<'a> {
+impl BLinkTree {
 
-    fn upsert(&'a self, query: &'a Query) -> Vec<&'a KeyData> {
-        match self.root {
+    fn upsert(& mut self, query: Query) -> Vec<&KeyData> {
+        match &self.root {
             Some(root) => {
-                let add = |kd: &'a (&String, DataRecord), _dn: &'a DataNode| { 
+                match root {
+                    TreeNode::INNER(n)=> {
+                        n.query_and_execute(query, |kd: &KeyData, _dn: &DataNode| { 
+                            let m = &n.children;
                             return kd; 
-                        };
-                return root.query_and_execute(query,   &add);
+                        })
+                    },
+                    TreeNode::DATA(n) => { 
+                        n.query_and_execute(query, |kd: &KeyData, _dn: &DataNode| { 
+                            let abc = _dn.get();
+                            return kd; 
+                        })
+                    }
+                }
             },
             None => vec![]
         }
     }
 
-    fn query(&self, query: &'a Query) -> Vec<&KeyData> {
-        match self.root {
-            Some(root) => root.query_and_execute(query, &|kd, _dn| { return kd; }),
+    fn query(&self, query: Query) -> Vec<&KeyData> {
+        match &self.root {
+            Some(root) => {
+                match root {
+                    TreeNode::INNER(n)=> {
+                        n.query_and_execute(query, |kd: &KeyData, _dn: &DataNode| { 
+                            let m = &n.children;
+                            return kd; 
+                        })
+                    },
+                    TreeNode::DATA(n) => { 
+                        n.query_and_execute(query, |kd: &KeyData, _dn: &DataNode| { 
+                            let abc = _dn.get();
+                            return kd; 
+                        })
+                    }
+                }
+            },
             None => vec![]
         }
     }
 
-    fn new() -> BLinkTree<'a> {
+    fn new() -> BLinkTree {
         BLinkTree{root: None}
     }
 }
-
 
 
 enum NodeType {
@@ -43,15 +68,15 @@ enum NodeType {
     DATA
 }
 
-struct DataRecord<'a> {
-    data: &'a String,
+struct DataRecord {
+    data: String,
 }
 
-struct Node<'a> {
+struct Node {
     node_type: NodeType,
     index_key: String,
-    parent: Option<&'a dyn BaseNode<'a>>,
-    sibling: Option<&'a dyn BaseNode<'a>>,
+    parent: Option<TreeNode>,
+    sibling: Option<TreeNode>,
 }
 
 
@@ -73,15 +98,20 @@ impl<'a> Query<'a> {
     }
 }
 
-struct InnenNode<'a> {
-    node: Node<'a>, 
-    children: &'a Vec<&'a KeyNode<'a>>,
+enum TreeNode {
+    INNER(Box<InnerNode>), 
+    DATA(Box<DataNode>),
+}
+
+struct InnerNode {
+    node: Node, 
+    children: Vec<KeyNode>,
 }
 
 trait BaseNode<'a> {
 
     /// query and executes the operation provided on the current node.
-    fn query_and_execute(&'a self, query_index_key: &'a Query, op: &'a dyn Fn(&'a KeyData, &'a DataNode) -> &'a KeyData<'a>) -> Vec<&'a KeyData>;
+    fn query_and_execute(&'a self, query_index_key: Query, op: impl FnMut(&'a KeyData, &'a DataNode) -> &'a KeyData) -> Vec<&'a KeyData>;
 
     /// Splits the current node into two nodes while registering the new node in the parent.
     /// The split operation is recursive. If the parent also reaches its maximum capacity, 
@@ -89,11 +119,24 @@ trait BaseNode<'a> {
     fn split(&'a self);
 }
 
-impl<'a> BaseNode<'a> for InnenNode<'a> {
+impl<'a> BaseNode<'a> for InnerNode {
     
-    fn query_and_execute(&self, query_index_key: &'a Query, op: &'a dyn Fn(&'a KeyData, &'a DataNode) -> &'a KeyData<'a>) -> Vec<&'a KeyData> {
-        for &key_node in self.children {
-            if query_index_key.is_in_range_of(key_node.0) {
+    fn query_and_execute(&'a self, query_index_key: Query, op: impl FnMut(&'a KeyData, &'a DataNode) -> &'a KeyData) -> Vec<&'a KeyData> {
+        for key_node in self.children {
+            if query_index_key.is_in_range_of(&key_node.0) {
+                match key_node.1 {
+                    TreeNode::INNER(n)=> {
+
+                        })
+                    },
+                    TreeNode::DATA(n) => { 
+                        n.query_and_execute(query, |kd: &KeyData, _dn: &DataNode| { 
+                            let abc = _dn.get();
+                            return kd; 
+                        })
+                    }
+                }
+
                 return key_node.1.query_and_execute(query_index_key, op);
             }
         }
@@ -108,11 +151,11 @@ impl<'a> BaseNode<'a> for InnenNode<'a> {
     }
 }
 
-impl<'a> BaseNode<'a> for DataNode<'a> {
+impl<'a> BaseNode<'a> for DataNode {
     
-    fn query_and_execute(&'a self, query_index_key: &'a Query, op: &'a dyn Fn(&'a KeyData, &'a DataNode) -> &'a KeyData<'a>) -> Vec<&'a KeyData> {
+    fn query_and_execute(&'a self, query_index_key: Query, op: impl FnMut(&'a KeyData, &'a DataNode) -> &'a KeyData) -> Vec<&'a KeyData> {
         let results = self.children.iter()
-            .filter(|&data_key| query_index_key.is_matched(data_key.0))
+            .filter(|&data_key| query_index_key.is_matched(&data_key.0))
             .map( |data_key| { op(data_key, self)})
             .collect();
 
@@ -126,16 +169,20 @@ impl<'a> BaseNode<'a> for DataNode<'a> {
 }
 
 
-struct DataNode<'a> {
-    node: Node<'a>, 
-    children: &'a mut Vec<KeyData<'a>>,
+struct DataNode {
+    node: Node, 
+    children: Vec<KeyData>,
 }
 
-impl<'a> DataNode<'a> {
+impl DataNode {
 
-    fn add(& mut self, query: & Query<'a>) {
-        let new_record: DataRecord = DataRecord{ data: query.payload };
-        self.children.push((query.query_str, new_record));
+    fn add(& mut self, query: &Query) {
+        let new_record: DataRecord = DataRecord{ data: query.payload.to_string() };
+        self.children.push((query.query_str.to_string(), new_record));
+    }
+
+    fn get(&self) -> &Vec<KeyData>{
+        &self.children
     }
 }
 
@@ -143,6 +190,6 @@ impl<'a> DataNode<'a> {
 fn main() {
     let blinktree = BLinkTree::new();
     let query = Query{query_str: & "nope".to_string(), payload: &"".to_string() };
-    let results = blinktree.query(&query);
+    let results = blinktree.query(query);
     println!("Size of the result set={}", results.len())
 }
