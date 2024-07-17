@@ -9,54 +9,6 @@ struct BLinkTree {
 }
 
 impl BLinkTree {
-
-    fn upsert(& mut self, query: Query) -> Vec<&KeyData> {
-        match &self.root {
-            Some(root) => {
-                match root {
-                    TreeNode::INNER(n)=> {
-                        n.query_and_execute(query, |kd: &KeyData, _dn: &DataNode| { 
-                            let m = &n.children;
-                            return kd; 
-                        })
-                    },
-                    TreeNode::DATA(n) => { 
-                        n.query_and_execute(query, |kd: &KeyData, _dn: &DataNode| { 
-                            let abc = _dn.get();
-                            return kd; 
-                        })
-                    }
-                }
-            },
-            None => vec![]
-        }
-    }
-
-    fn query(&self, query: Query) -> Vec<&KeyData> {
-        match &self.root {
-            Some(root) => {
-                match root {
-                    TreeNode::INNER(n)=> {
-                        n.query_and_execute(query, |kd: &KeyData, _dn: &DataNode| { 
-                            let m = &n.children;
-                            return kd; 
-                        })
-                    },
-                    TreeNode::DATA(n) => { 
-                        n.query_and_execute(query, |kd: &KeyData, _dn: &DataNode| { 
-                            let abc = _dn.get();
-                            return kd; 
-                        })
-                    }
-                }
-            },
-            None => vec![]
-        }
-    }
-
-    fn new() -> BLinkTree {
-        BLinkTree{root: None}
-    }
 }
 
 
@@ -108,66 +60,65 @@ struct InnerNode {
     children: Vec<KeyNode>,
 }
 
-trait BaseNode<'a> {
+impl InnerNode {
 
-    /// query and executes the operation provided on the current node.
-    fn query_and_execute(&'a self, query_index_key: Query, op: impl FnMut(&'a KeyData, &'a DataNode) -> &'a KeyData) -> Vec<&'a KeyData>;
+    fn locate_range_key(&self, query_index_key: &Query) -> Option<&KeyNode> {
+        self.children.iter()
+            .find(|child| query_index_key.is_in_range_of(&child.0))
+    }
 
-    /// Splits the current node into two nodes while registering the new node in the parent.
-    /// The split operation is recursive. If the parent also reaches its maximum capacity, 
-    /// it will continue to split including the root node.
-    fn split(&'a self);
-}
-
-impl<'a> BaseNode<'a> for InnerNode {
-    
-    fn query_and_execute(&'a self, query_index_key: Query, op: impl FnMut(&'a KeyData, &'a DataNode) -> &'a KeyData) -> Vec<&'a KeyData> {
-        for key_node in &self.children {
-            if query_index_key.is_in_range_of(&key_node.0) {
-                match &key_node.1 {
-                    TreeNode::INNER(n)=> {
-                        return n.query_and_execute(query_index_key, op);
-                    },
-                    TreeNode::DATA(n) => { 
-                        return  n.query_and_execute(query_index_key, op);
-                    }
-                }
-            }
-        }
+    fn query_thru_sibling(&self, query_index_key: &Query) -> &DataNode {
         match &self.node.sibling {
-            Some(n) => {
-                match n {
-                    TreeNode::INNER(n)=> {
-                        return n.query_and_execute(query_index_key, op);
-                    },
-                    TreeNode::DATA(n) => { 
-                        return  n.query_and_execute(query_index_key, op);
-                    }                
-                }
+            Some(s) => match s {
+                TreeNode::INNER(i) => i.query_datanode(query_index_key),
+                _ => panic!("Not expected to find a data node sibling!")
             },
-            _ => panic!("Don't expected to be there.!") 
+            // Sibling doesn't exist, so we reached the most right branch of the tree.
+            None => self.query_thru_last(query_index_key),  
         }
     }
-    
-    fn split(&self) {
-        todo!()
+
+    fn query_thru_last(&self, query_index_key: &Query) -> &DataNode {
+        match self.children.last() {
+            Some(s) => match &s.1 {
+                TreeNode::INNER(i) => i.query_datanode(query_index_key),
+                _ => panic!("Not expected to find a data node sibling!")
+            },
+            _ => panic!("Not expected to find a data node sibling!"),
+        }
+    }
+
+    fn query_datanode(&self, query_index_key: &Query) -> &DataNode {
+        match self.locate_range_key(query_index_key) {
+            Some(rk) => match &rk.1 {
+                TreeNode::INNER(ic) =>  ic.query_datanode(query_index_key), 
+                TreeNode::DATA(dc) => dc,
+            },
+            None => self.query_thru_sibling(query_index_key), 
+        }
     }
 }
 
-impl<'a> BaseNode<'a> for DataNode {
+pub trait BaseNode {
+    /// query and executes the operation provided on the current node.
+    fn query(&self, query_index_key: &Query) -> Vec<&KeyData>;
+}
+
+impl BaseNode for InnerNode {
     
-    fn query_and_execute(&'a self, query_index_key: Query, mut op: impl FnMut(&'a KeyData, &'a DataNode) -> &'a KeyData) -> Vec<&'a KeyData> {
-        let results = self.children.iter()
-            .filter(|&data_key| query_index_key.is_matched(&data_key.0))
-            .map( |data_key| { op(data_key, self)})
+    fn query(&self, query_index_key: &Query) -> Vec<&KeyData> {
+       return self.query_datanode(query_index_key).query(query_index_key);
+    }
+}
+
+impl BaseNode for DataNode {
+    
+    fn query(&self, query_index_key: &Query) -> Vec<&KeyData> {
+        let matches: Vec<&KeyData> = self.children.iter()
+            .filter(|child| query_index_key.is_matched(&child.0))
             .collect();
 
-        return results;
-        
-    }
-    
-    fn split(&self) {
-        todo!()
+        return matches;
     }
 }
 
@@ -179,20 +130,14 @@ struct DataNode {
 
 impl DataNode {
 
-    fn add(& mut self, query: &Query) {
+    fn add(&mut self, query: &Query) {
         let new_record: DataRecord = DataRecord{ data: query.payload.to_string() };
         self.children.push((query.query_str.to_string(), new_record));
-    }
-
-    fn get(&self) -> &Vec<KeyData>{
-        &self.children
     }
 }
 
 
 fn main() {
-    let blinktree = BLinkTree::new();
-    let query = Query{query_str: & "nope".to_string(), payload: &"".to_string() };
-    let results = blinktree.query(query);
-    println!("Size of the result set={}", results.len())
+    let m=5;
+    println!("test")
 }
