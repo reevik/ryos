@@ -138,6 +138,4 @@ impl DataNode {
 
 
 fn main() {
-    let m=5;
-    println!("test")
 }
