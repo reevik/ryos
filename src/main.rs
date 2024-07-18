@@ -62,13 +62,13 @@ struct InnerNode {
 
 impl InnerNode {
 
-    fn locate_range_key(&self, query_index_key: &Query) -> Option<&KeyNode> {
-        self.children.iter()
+    fn locate_range_key(&mut self, query_index_key: &Query) -> Option<&mut KeyNode> {
+        self.children.iter_mut()
             .find(|child| query_index_key.is_in_range_of(&child.0))
     }
 
-    fn query_thru_sibling(&self, query_index_key: &Query) -> &DataNode {
-        match &self.node.sibling {
+    fn query_thru_sibling(&mut self, query_index_key: &Query) -> &mut DataNode {
+        match &mut self.node.sibling {
             Some(s) => match s {
                 TreeNode::INNER(i) => i.query_datanode(query_index_key),
                 _ => panic!("Not expected to find a data node sibling!")
@@ -78,7 +78,7 @@ impl InnerNode {
         }
     }
 
-    fn query_thru_last(&self, query_index_key: &Query) -> &DataNode {
+    fn query_thru_last(&self, query_index_key: &Query) -> &mut DataNode {
         match self.children.last() {
             Some(s) => match &s.1 {
                 TreeNode::INNER(i) => i.query_datanode(query_index_key),
@@ -88,9 +88,9 @@ impl InnerNode {
         }
     }
 
-    fn query_datanode(&self, query_index_key: &Query) -> &DataNode {
+    fn query_datanode(&mut self, query_index_key: &Query) -> &mut DataNode {
         match self.locate_range_key(query_index_key) {
-            Some(rk) => match &rk.1 {
+            Some(rk) => match &mut rk.1 {
                 TreeNode::INNER(ic) =>  ic.query_datanode(query_index_key), 
                 TreeNode::DATA(dc) => dc,
             },
